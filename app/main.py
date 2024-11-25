@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
-from datetime import date
+from datetime import datetime
+import psycopg2 
+from psycopg2.extras import RealDictCursor
 
 class Student(BaseModel):
     surname: str
@@ -11,6 +13,18 @@ class Student(BaseModel):
 
 
 app = FastAPI()
+
+while True:
+
+    try:
+        con = psycopg2.connect(database="schoolmanagement", user="postgres",
+                            password="root", port="5433")
+        cursor = con.cursor()
+        print("connection to database successfull")
+        break;
+    except Exception as error:
+        print("connection to database failed")
+        print(error)
 
 students = [
     {
@@ -39,48 +53,70 @@ def findStudentIndex(student):
 def welcome():
     return {"message": "Welcome"}
 
+# get all students from databases
+
 @app.get("/students")
 def getAllStudents():
+    cursor.execute(""" SELECT * FROM students """)
+    students = cursor.fetchall()
+
     return {"data": students}
 
+# get a student by his student_id
 @app.get("/students/{studentId}")
 def getSingleStudent(studentId: str):
-    student = findStudentById(studentId.upper())
-    print(student)
+    cursor.execute(""" SELECT * FROM students WHERE student_id = %s """,(studentId, ))
+    student = cursor.fetchone()
 
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": "No student found for this id"})
     
     return {"data": student}
 
+#  create a student 
 
 @app.post("/students", status_code=status.HTTP_201_CREATED)
 def createStudent(student: Student):
-    studentDict = student.model_dump()
-    print(studentDict)
-    students.append(studentDict)
-    return {"data": studentDict}
+    print(student.bornDate.strip())
+    try:
+        formatedBornDate = datetime.strptime(student.bornDate.strip(), '%d-%m-%Y')
+
+        cursor.execute(""" INSERT INTO students (surname, firstname, born_date, class_name, student_id) 
+                VALUES (%s, %s, %s, %s, %s ) RETURNING * """, (student.surname.upper(), student.firstname, formatedBornDate, 
+                                                               student.className, student.studentId.upper(), ))
+        student = cursor.fetchall()
+        con.commit()
+        print("creation successfull")
+    except Exception as error:
+        print(error)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail= {"error": "An error occurs during the student creation "})
+   
+    return {"message": "Student created sucessfully", "data": student}
+
+# update Student
 
 @app.put("/students")
 def updateStudent(student: Student):
-    studentIndex = findStudentIndex(student.model_dump())
-    print(studentIndex)
 
-    if studentIndex == None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"No User found for the id: {student.studentId.upper()}"})
-    
-    students[studentIndex] = student
+    try:
+        formatedBornDate = datetime.strptime(student.bornDate.strip(), '%d-%m-%Y')
+        cursor.execute(""" UPDATE students SET surname = %s ,firstname = %s , born_date = %s , class_name = %s WHERE student_id = %s """, 
+                   (student.surname, student.firstname, formatedBornDate, student.className, student.studentId.upper(), ))
+        con.commit()
+    except Exception as error:
+        print(error)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"error": "An error occured "})
+
     return {"message": f"Student with id: {student.studentId.upper()} updated successfully"}
 
 @app.delete("/students/{studentId}")
 def deleteStudent(studentId: str):
-    student = findStudentById(studentId)
+    try: 
+        cursor.execute(""" DELETE FROM students WHERE student_id = %s """, (studentId.upper(), ))
+        con.commit()
+    except Exception as error:
+        print(error)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"error": "an error occured"})
 
-    if student == None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": f"No student found for id : {studentId.upper()}"})
-    
-
-    studentIndex = findStudentIndex(student)
-    students.pop(studentIndex)
     return {"message": f"student {studentId.upper()} deleted successfully"}
 
