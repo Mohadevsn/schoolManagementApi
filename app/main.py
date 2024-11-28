@@ -18,35 +18,13 @@ while True:
 
     try:
         con = psycopg2.connect(database="schoolmanagement", user="postgres",
-                            password="root", port="5433")
+                            password="root", port="5433", cursor_factory=RealDictCursor)
         cursor = con.cursor()
         print("connection to database successfull")
         break;
     except Exception as error:
         print("connection to database failed")
         print(error)
-
-students = [
-    {
-        "studentId": "20220AXTJ",
-        "surname": "WADE",
-        "firstname": "Mohamed",
-        "bornDate": "11/11/2002",
-        "className": "GLSI A"
-    }
-]
-
-def findStudentById(id):
-    for std in students:
-        if std["studentId"] == id.upper():
-            return std
-
-def findStudentIndex(student):
-    print(student)
-    for i, std in enumerate(students):
-        if std["studentId"] == student["studentId"].upper():
-            return i
-    return None
 
 
 @app.get("/")
@@ -95,19 +73,19 @@ def createStudent(student: Student):
 
 # update Student
 
-@app.put("/students")
+@app.put("/students/")
 def updateStudent(student: Student):
 
-    try:
-        formatedBornDate = datetime.strptime(student.bornDate.strip(), '%d-%m-%Y')
-        cursor.execute(""" UPDATE students SET surname = %s ,firstname = %s , born_date = %s , class_name = %s WHERE student_id = %s """, 
-                   (student.surname, student.firstname, formatedBornDate, student.className, student.studentId.upper(), ))
-        con.commit()
-    except Exception as error:
-        print(error)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"error": "An error occured "})
+    formatedBornDate = datetime.strptime(student.bornDate.strip(), '%d-%m-%Y')
+    cursor.execute(""" UPDATE students SET surname = %s ,firstname = %s , born_date = %s , class_name = %s WHERE student_id = %s RETURNING * """, 
+                (student.surname, student.firstname, formatedBornDate, student.className, student.studentId.upper(), ))
+    updatedStudent = cursor.fetchone()
+    if updatedStudent == None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error":f"No student with id {student.studentId.upper()} found"})
+    
+    con.commit()
 
-    return {"message": f"Student with id: {student.studentId.upper()} updated successfully"}
+    return {"message": f"Student with id: {student.studentId.upper()} updated successfully", "data": updatedStudent}
 
 @app.delete("/students/{studentId}")
 def deleteStudent(studentId: str):
